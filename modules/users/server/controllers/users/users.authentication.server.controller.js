@@ -7,7 +7,10 @@ var path = require('path'),
   errorHandler = require(path.resolve('./modules/core/server/controllers/errors.server.controller')),
   mongoose = require('mongoose'),
   passport = require('passport'),
-  User = mongoose.model('User');
+  OAuth2Strategy = require('passport-oauth2'),
+  User = mongoose.model('User'),
+  config = require(path.resolve('./config/config')),
+  request = require('request');
 
 // URLs for which user can't be redirected on signin
 var noReturnUrls = [
@@ -53,23 +56,75 @@ exports.signup = function (req, res) {
  * Signin after passport authentication
  */
 exports.signin = function (req, res, next) {
-  passport.authenticate('local', function (err, user, info) {
-    if (err || !user) {
-      res.status(400).send(info);
-    } else {
-      // Remove sensitive data before login
-      user.password = undefined;
-      user.salt = undefined;
+  // passport.authenticate('local', function (err, user, info) {
+  //   if (err || !user) {
+  //     res.status(400).send(info);
+  //   } else {
+  //     // Remove sensitive data before login
+  //     user.password = undefined;
+  //     user.salt = undefined;
+  //
+  //     req.login(user, function (err) {
+  //       if (err) {
+  //         res.status(400).send(err);
+  //       } else {
+  //         res.json(user);
+  //       }
+  //     });
+  //   }
+  // })(req, res, next);
+  console.log('logging in');
+  request.post({
+    url: 'https://api.us.onelogin.com/auth/oauth2/token',
+    headers: {
+      'content-type': 'application/json',
+      'Authorization': 'client_id: ' + config.onelogin.clientID +
+        ', client_secret: ' + config.onelogin.clientSecret
+    },
+    body: '{ "grant_type": "client_credentials" }'
+  },
+  function (error, response, body) {
+    if (!error && response.statusCode === 200) {
+      var json = JSON.parse(body);
+      var access_token = json.data[0].access_token;
 
-      req.login(user, function (err) {
-        if (err) {
-          res.status(400).send(err);
+      request.post({
+        url: 'https://api.us.onelogin.com/api/1/login/auth',
+        headers: {
+          'content-type': 'application/json',
+          'Authorization': 'bearer:' + access_token
+        },
+        body: body
+      },
+      function (error, response, body) {
+        if (error) {
+          return res.redirect('/authentication/signin?err=' + encodeURIComponent('Invalid username or password'));
         } else {
-          res.json(user);
+          if (response.statusCode === 200) {
+            var userJson = JSON.parse(body);
+            var user = userJson.user;
+
+            if (!user) {
+              return res.redirect('/authentication/signin');
+            }
+            req.login(user, function (err) {
+              if (err) {
+                return res.redirect('/authentication/signin');
+              }
+
+              return res.redirect(redirectURL || sessionRedirectURL || '/');
+            });
+          } else {
+            return res.redirect('/authentication/signin?err=' + encodeURIComponent('Invalid username or password'));
+          }
         }
       });
+    } else {
+      return res.status(400).send({
+        message: 'Error logging in'
+      });
     }
-  })(req, res, next);
+  });
 };
 
 /**

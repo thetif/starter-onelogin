@@ -34,6 +34,11 @@ module.exports = {
   app: {
     title: defaultEnvConfig.app.title + ' - Development Environment'
   },
+  onelogin: {
+    clientID: process.env.ONELOGIN_ID || 'APP_ID',
+    clientSecret: process.env.ONELOGIN_SECRET || 'APP_SECRET',
+    callbackURL: '/api/auth/onelogin/callback'
+  },
   facebook: {
     clientID: process.env.FACEBOOK_ID || 'APP_ID',
     clientSecret: process.env.FACEBOOK_SECRET || 'APP_SECRET',
