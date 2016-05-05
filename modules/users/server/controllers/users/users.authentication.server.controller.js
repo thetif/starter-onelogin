@@ -73,7 +73,6 @@ exports.signin = function (req, res, next) {
   //     });
   //   }
   // })(req, res, next);
-  console.log('logging in');
   request.post({
     url: 'https://api.us.onelogin.com/auth/oauth2/token',
     headers: {
@@ -87,6 +86,8 @@ exports.signin = function (req, res, next) {
     if (!error && response.statusCode === 200) {
       var json = JSON.parse(body);
       var access_token = json.data[0].access_token;
+      var authBody = '{ "username_or_email":"' + req.body.username + '","password":"' +
+        req.body.password + '", "subdomain": "fearless"}';
 
       request.post({
         url: 'https://api.us.onelogin.com/api/1/login/auth',
@@ -94,28 +95,73 @@ exports.signin = function (req, res, next) {
           'content-type': 'application/json',
           'Authorization': 'bearer:' + access_token
         },
-        body: body
+        body: authBody
       },
       function (error, response, body) {
         if (error) {
-          return res.redirect('/authentication/signin?err=' + encodeURIComponent('Invalid username or password'));
+          console.log('error', error);
+          return res.status(400).send({
+            message: errorHandler.getErrorMessage(error)
+          });
         } else {
           if (response.statusCode === 200) {
             var userJson = JSON.parse(body);
-            var user = userJson.user;
+            console.log('user', userJson.data[0].user);
+            var profile = userJson.data[0].user;
+            var providerUserProfile = {
+              firstName: profile.firstname,
+              lastName: profile.lastname,
+              displayName: profile.firstname + ' ' + profile.lastname,
+              email: profile.email,
+              username: profile.username,
+              provider: 'onelogin',
+              providerIdentifierField: 'id',
+              providerData: profile
+            };
 
-            if (!user) {
-              return res.redirect('/authentication/signin');
+            if (!profile) {
+              return res.status(400).send({
+                message: 'Invalid username or password'
+              });
+            } else {
+              User.findOne({ 'username': profile.username }).exec(function(err, user) {
+                if (err) {
+                  return res.status(400).send({
+                    message: 'Invalid username or password'
+                  });
+                } else if (!user) {
+                  user = new User(providerUserProfile);
+                  user.save(function (err) {
+                    if (err) {
+                      return res.status(400).send({
+                        message: 'Invalid username or password'
+                      });
+                    } else {
+                      req.login(user, function (err) {
+                        if (err) {
+                          res.status(400).send(err);
+                        } else {
+                          res.json(user);
+                        }
+                      });
+                    }
+                  });
+                } else {
+                  req.login(user, function (err) {
+                    if (err) {
+                      res.status(400).send(err);
+                    } else {
+                      res.json(user);
+                    }
+                  });
+                }
+              });
             }
-            req.login(user, function (err) {
-              if (err) {
-                return res.redirect('/authentication/signin');
-              }
-
-              return res.redirect(redirectURL || sessionRedirectURL || '/');
-            });
           } else {
-            return res.redirect('/authentication/signin?err=' + encodeURIComponent('Invalid username or password'));
+            console.log('body', body);
+            return res.status(400).send({
+              message: 'Invalid username or password'
+            });
           }
         }
       });
